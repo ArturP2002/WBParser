@@ -7,6 +7,29 @@ from database.models.task_exclude_word import TaskExcludeWord
 from core.logger import logger
 
 
+def normalize_text_for_relevance(text: str) -> str:
+    """Unify Latin/Cyrillic and storage spelling so query matches WB titles.
+
+    Examples: ``512 Гб`` / ``512гб`` / ``512 GB`` → ``512gb``; ``айфон`` → ``iphone``.
+    """
+    if not text:
+        return ""
+    s = text.lower().strip()
+    s = re.sub(r"\bайфон\b", "iphone", s)
+    s = re.sub(
+        r"(\d+)\s*гигабайт(?:а|ов)?\b",
+        r"\1gb",
+        s,
+        flags=re.IGNORECASE,
+    )
+    s = re.sub(r"(\d+)\s*гб\b", r"\1gb", s, flags=re.IGNORECASE)
+    s = re.sub(r"(\d+)\s*gb\b", r"\1gb", s, flags=re.IGNORECASE)
+    s = re.sub(r"(\d+)\s*тб\b", r"\1tb", s, flags=re.IGNORECASE)
+    s = re.sub(r"(\d+)\s*tb\b", r"\1tb", s, flags=re.IGNORECASE)
+    s = re.sub(r"\s+", " ", s).strip()
+    return s
+
+
 def contains_excluded_words(
     product: WBProduct, 
     exclude_words: List[TaskExcludeWord]
@@ -39,13 +62,12 @@ def is_relevant_to_query(product: WBProduct, query: str) -> bool:
     """
     if not query or not product.name:
         return True  # If no query, don't filter
-    
-    # Normalize: lowercase, remove special chars
-    query_lower = query.lower().strip()
-    product_name_lower = product.name.lower()
-    
+
+    query_lower = normalize_text_for_relevance(query)
+    product_name_lower = normalize_text_for_relevance(product.name)
+
     # Split query into words (remove punctuation, split by spaces)
-    query_words = re.findall(r'\b\w+\b', query_lower)
+    query_words = re.findall(r"\b\w+\b", query_lower)
     
     # Filter out very short words (likely not significant)
     significant_words = [w for w in query_words if len(w) >= 3]
@@ -60,9 +82,12 @@ def is_relevant_to_query(product: WBProduct, query: str) -> bool:
     # This is more flexible than "all words" - allows for variations in product names
     matched_words = 0
     for word in significant_words:
-        # Use word boundary to avoid partial matches (e.g., "iphone" in "smartphone")
-        pattern = r'\b' + re.escape(word) + r'\b'
-        if re.search(pattern, product_name_lower):
+        if word.isdigit():
+            # After normalization, storage is "512gb"; still allow query token "512"
+            pattern = rf"(?<!\d){re.escape(word)}(?:gb|tb)?(?!\w)"
+        else:
+            pattern = r"\b" + re.escape(word) + r"\b"
+        if re.search(pattern, product_name_lower, flags=re.IGNORECASE):
             matched_words += 1
     
     # Calculate threshold: at least 50% or minimum 2 words (if query has 3+ words)
