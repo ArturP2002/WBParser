@@ -11,12 +11,21 @@ from core.config import config
 from core.logger import logger
 
 
+def _price_in_task_range(task: SearchTask, price: int) -> bool:
+    """True if price is inside the task bounds (same rule as new-product filter)."""
+    return (
+        (task.price_min is None or price >= task.price_min)
+        and (task.price_max is None or price <= task.price_max)
+    )
+
+
 class PriceDetector:
     """Detector for price changes and new products."""
-    
+
     EVENT_NEW_PRODUCT = "new_product"
     EVENT_ENTER_RANGE = "enter_range"
     EVENT_PRICE_DROP = "price_drop"
+    EVENT_PRICE_CHANGE = "price_change"
     
     def __init__(self, session: AsyncSession):
         """Initialize price detector."""
@@ -47,8 +56,10 @@ class PriceDetector:
         # Get last price from cache (O(1))
         last_price = await self.price_cache.get_last_price(product.id)
         
-        # Check event deduplication
-        if await EventDeduplication.check_exists(task.user_id, product.id):
+        # Check event deduplication (same new price → skip repeat within TTL)
+        if await EventDeduplication.check_exists(
+            task.user_id, product.id, current_price
+        ):
             logger.info(
                 f"Product {product.id} ({product.name[:50]}...): "
                 f"no event - already processed (deduplication)"
@@ -59,13 +70,7 @@ class PriceDetector:
         event_type = None
         
         if last_price is None:
-            # New product - check if price is in range
-            price_in_range = (
-                (task.price_min is None or current_price >= task.price_min)
-                and (task.price_max is None or current_price <= task.price_max)
-            )
-            
-            if price_in_range:
+            if _price_in_task_range(task, current_price):
                 event_type = self.EVENT_NEW_PRODUCT
             else:
                 logger.info(
@@ -81,8 +86,8 @@ class PriceDetector:
                 and current_price <= task.price_max
             ):
                 event_type = self.EVENT_ENTER_RANGE
-            
-            # Check price drop
+
+            # Price drop (kept for explicit ⬇️ messaging; subset of price_change)
             elif (
                 task.price_min is not None
                 and last_price >= task.price_min
@@ -90,7 +95,15 @@ class PriceDetector:
                 and abs(last_price - current_price) >= config.MIN_PRICE_CHANGE
             ):
                 event_type = self.EVENT_PRICE_DROP
-            
+
+            # Any other significant change while still matching task filters (incl. rises)
+            elif (
+                last_price != current_price
+                and abs(last_price - current_price) >= config.MIN_PRICE_CHANGE
+                and _price_in_task_range(task, current_price)
+            ):
+                event_type = self.EVENT_PRICE_CHANGE
+
             if not event_type:
                 logger.info(
                     f"Product {product.id} ({product.name[:50]}...): "
@@ -101,8 +114,9 @@ class PriceDetector:
         if not event_type:
             return None
         
-        # Mark event as processed
-        await EventDeduplication.mark_processed(task.user_id, product.id)
+        await EventDeduplication.mark_processed(
+            task.user_id, product.id, current_price
+        )
         
         # Update price cache
         await self.price_cache.update_price(product.id, current_price)

@@ -76,10 +76,24 @@ class NotificationService:
         else:
             message += f"Цена: {current_price} руб"
         
-        # Event type indicator
         if event_type == "enter_range":
             message += " 🎯"
         elif event_type == "price_drop":
             message += " ⬇️"
-        
+        elif event_type == "price_change":
+            if (
+                price_old is not None
+                and price_new is not None
+                and price_new > price_old
+            ):
+                message += " ⬆️"
+            elif (
+                price_old is not None
+                and price_new is not None
+                and price_new < price_old
+            ):
+                message += " ⬇️"
+            else:
+                message += " 💱"
+
         return message
