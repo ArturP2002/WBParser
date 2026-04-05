@@ -13,7 +13,6 @@ from parser.processing.seller_grouper import SellerGrouper
 from parser.processing.product_normalizer import ProductNormalizer
 from database.repositories.product_repository import ProductRepository
 from database.repositories.task_repository import SearchTaskRepository
-from database.repositories.price_repository import ProductPriceRepository
 from infrastructure.redis.redis_streams import RedisStreams
 from event_detector.detector.price_detector import PriceDetector
 from core.logger import logger
@@ -34,7 +33,6 @@ class ParserEngine:
         self.normalizer = ProductNormalizer()
         self.product_repo = ProductRepository(session)
         self.task_repo = SearchTaskRepository(session)
-        self.price_repo = ProductPriceRepository(session)
         self.price_detector = PriceDetector(session)
     
     async def parse_task(self, task) -> List[dict]:
@@ -89,7 +87,8 @@ class ParserEngine:
                 
                 # Deduplicate
                 existing_product, is_new = await self.deduplicator.deduplicate(
-                    wb_product
+                    wb_product,
+                    task.user_id,
                 )
                 
                 # Yield after DB operation to allow bot to process messages
@@ -105,6 +104,7 @@ class ParserEngine:
                     )
                     product = await self.product_repo.create_or_update(
                         wb_id=wb_product.id,
+                        user_id=task.user_id,
                         name=wb_product.name,
                         root_id=wb_product.root,
                         normalized_name=normalized_name,

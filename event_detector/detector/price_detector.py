@@ -3,8 +3,7 @@ from typing import Optional, Dict, Any
 from sqlalchemy.ext.asyncio import AsyncSession
 from database.models.product import Product
 from database.models.search_task import SearchTask
-from database.repositories.product_repository import ProductRepository
-from database.repositories.price_repository import ProductPriceRepository
+from database.repositories.task_product_price_repository import TaskProductPriceRepository
 from event_detector.detector.price_cache import PriceCacheManager
 from notifier.worker.rate_limiter import EventDeduplication
 from core.config import config
@@ -30,9 +29,8 @@ class PriceDetector:
     def __init__(self, session: AsyncSession):
         """Initialize price detector."""
         self.session = session
-        self.product_repo = ProductRepository(session)
-        self.price_repo = ProductPriceRepository(session)
-        self.price_cache = PriceCacheManager(self.price_repo)
+        self.task_price_repo = TaskProductPriceRepository(session)
+        self.price_cache = PriceCacheManager(self.task_price_repo)
     
     async def detect_event(
         self,
@@ -54,11 +52,11 @@ class PriceDetector:
             return None
         
         # Get last price from cache (O(1))
-        last_price = await self.price_cache.get_last_price(product.id)
-        
+        last_price = await self.price_cache.get_last_price(task.id, product.id)
+
         # Check event deduplication (same new price → skip repeat within TTL)
         if await EventDeduplication.check_exists(
-            task.user_id, product.id, current_price
+            task.id, product.id, current_price
         ):
             logger.info(
                 f"Product {product.id} ({product.name[:50]}...): "
@@ -115,11 +113,10 @@ class PriceDetector:
             return None
         
         await EventDeduplication.mark_processed(
-            task.user_id, product.id, current_price
+            task.id, product.id, current_price
         )
-        
-        # Update price cache
-        await self.price_cache.update_price(product.id, current_price)
+
+        await self.price_cache.update_price(task.id, product.id, current_price)
         
         # Create event
         event = {

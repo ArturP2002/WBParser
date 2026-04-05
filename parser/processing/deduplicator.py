@@ -8,10 +8,10 @@ from core.logger import logger
 
 
 class Deduplicator:
-    """Match products by Wildberries nm_id (wb_id) only.
+    """Match products by Wildberries nm_id (wb_id) within one bot user.
 
-    Same model from different sellers is a separate card on WB; we keep them
-    separate so notifications mirror the site (like competitor bots).
+    Same WB card is a separate DB row per user. Same model from different
+    sellers stays separate cards (different nm_id), mirroring the site.
     """
 
     def __init__(self, session: AsyncSession):
@@ -22,13 +22,14 @@ class Deduplicator:
     async def deduplicate(
         self,
         wb_product: WBProduct,
+        user_id: int,
     ) -> Tuple[Optional[Product], bool]:
-        """Return existing row for this nm_id or mark as new.
+        """Return existing row for this nm_id for the user or mark as new.
 
         Returns:
             Tuple of (existing_product, is_new)
         """
-        existing = await self.product_repo.get_by_wb_id(wb_product.id)
+        existing = await self.product_repo.get_by_wb_id(wb_product.id, user_id)
         if existing:
             logger.debug(f"Found product by wb_id: {wb_product.id}")
             return existing, False

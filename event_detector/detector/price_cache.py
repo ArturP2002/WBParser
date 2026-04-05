@@ -1,46 +1,32 @@
-"""Price cache for event detector."""
+"""Price cache for event detector (per search task + product)."""
 from typing import Optional
 from infrastructure.redis.redis_cache import PriceCache
-from database.repositories.price_repository import ProductPriceRepository
-from core.logger import logger
+from database.repositories.task_product_price_repository import TaskProductPriceRepository
+from core.config import config
 
 
 class PriceCacheManager:
-    """Manager for price caching."""
-    
-    def __init__(self, price_repo: ProductPriceRepository):
-        """Initialize price cache manager."""
+    """Manager for task-scoped price caching."""
+
+    def __init__(self, price_repo: TaskProductPriceRepository):
         self.price_repo = price_repo
         self.price_cache = PriceCache()
-    
-    async def get_last_price(self, product_id: int) -> Optional[int]:
-        """Get last price from Redis cache or DB.
-        
-        O(1) operation with Redis, much faster than SQL query.
-        """
-        # Try Redis first (O(1))
-        cached_price = await self.price_cache.get_cached_price(product_id)
+
+    async def get_last_price(self, task_id: int, product_id: int) -> Optional[int]:
+        """Last known price for this task seeing this product (Redis then DB)."""
+        cached_price = await self.price_cache.get_cached_price(task_id, product_id)
         if cached_price is not None:
             return cached_price
-        
-        # Fallback to DB
-        db_price = await self.price_repo.get_latest_price(product_id)
+
+        db_price = await self.price_repo.get_latest_price(task_id, product_id)
         if db_price is not None:
-            # Cache it for next time
-            await self.price_cache.cache_price(product_id, db_price)
-        
+            await self.price_cache.cache_price(task_id, product_id, db_price)
+
         return db_price
-    
-    async def update_price(
-        self, 
-        product_id: int, 
-        price: int
-    ) -> None:
-        """Update price in cache and DB."""
-        # Update cache
-        await self.price_cache.cache_price(product_id, price)
-        
-        # Save to DB (only if changed significantly)
-        last_price = await self.get_last_price(product_id)
-        if last_price is None or abs(last_price - price) >= 200:
-            await self.price_repo.create(product_id, price)
+
+    async def update_price(self, task_id: int, product_id: int, price: int) -> None:
+        """Update cache and persist when change is significant vs previous snapshot."""
+        previous = await self.get_last_price(task_id, product_id)
+        await self.price_cache.cache_price(task_id, product_id, price)
+        if previous is None or abs(previous - price) >= config.MIN_PRICE_CHANGE:
+            await self.price_repo.create(task_id, product_id, price)

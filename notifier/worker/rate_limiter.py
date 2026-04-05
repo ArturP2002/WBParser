@@ -41,28 +41,28 @@ class NotificationDeduplication:
     """Deduplication for notifications."""
     
     @staticmethod
-    def _get_key(user_id: int, product_id: int, price: int) -> str:
-        """Get deduplication key."""
-        return f"notify:{user_id}:{product_id}:{price}"
-    
+    def _get_key(task_id: int, product_id: int, price: int) -> str:
+        """Get deduplication key (per search task)."""
+        return f"notify:task:{task_id}:product:{product_id}:price:{price}"
+
     @staticmethod
     async def check_exists(
-        user_id: int, 
-        product_id: int, 
-        price: int
+        task_id: int,
+        product_id: int,
+        price: int,
     ) -> bool:
-        """Check if notification already sent."""
-        key = NotificationDeduplication._get_key(user_id, product_id, price)
+        """Check if notification already sent for this task/product/price."""
+        key = NotificationDeduplication._get_key(task_id, product_id, price)
         return await redis_client.exists(key)
-    
+
     @staticmethod
     async def mark_sent(
-        user_id: int, 
-        product_id: int, 
-        price: int
+        task_id: int,
+        product_id: int,
+        price: int,
     ) -> None:
         """Mark notification as sent."""
-        key = NotificationDeduplication._get_key(user_id, product_id, price)
+        key = NotificationDeduplication._get_key(task_id, product_id, price)
         await redis_client.set(
             key, 
             "1", 
@@ -71,21 +71,21 @@ class NotificationDeduplication:
 
 
 class EventDeduplication:
-    """Deduplication for events (per user, product, and new price)."""
+    """Deduplication for events (per search task, product, and settled price)."""
 
     @staticmethod
-    def _get_key(user_id: int, product_id: int, new_price: int) -> str:
-        """Get deduplication key — allows another event after price moves again."""
-        return f"event:{user_id}:{product_id}:{new_price}"
+    def _get_key(task_id: int, product_id: int, new_price: int) -> str:
+        """Key allows another event after price moves again."""
+        return f"event:task:{task_id}:product:{product_id}:price:{new_price}"
 
     @staticmethod
-    async def check_exists(user_id: int, product_id: int, new_price: int) -> bool:
-        """Check if this emission (product settled at new_price) was already processed."""
-        key = EventDeduplication._get_key(user_id, product_id, new_price)
+    async def check_exists(task_id: int, product_id: int, new_price: int) -> bool:
+        """Check if this emission was already processed for this task."""
+        key = EventDeduplication._get_key(task_id, product_id, new_price)
         return await redis_client.exists(key)
 
     @staticmethod
-    async def mark_processed(user_id: int, product_id: int, new_price: int) -> None:
+    async def mark_processed(task_id: int, product_id: int, new_price: int) -> None:
         """Mark event as processed."""
-        key = EventDeduplication._get_key(user_id, product_id, new_price)
+        key = EventDeduplication._get_key(task_id, product_id, new_price)
         await redis_client.set(key, "1", ex=config.EVENT_DEDUP_TTL)

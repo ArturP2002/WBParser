@@ -12,10 +12,13 @@ class ProductRepository:
         """Initialize repository with session."""
         self.session = session
     
-    async def get_by_wb_id(self, wb_id: int) -> Optional[Product]:
-        """Get product by wb_id."""
+    async def get_by_wb_id(self, wb_id: int, user_id: int) -> Optional[Product]:
+        """Get product by Wildberries nm_id for a specific user."""
         result = await self.session.execute(
-            select(Product).where(Product.wb_id == wb_id)
+            select(Product).where(
+                Product.wb_id == wb_id,
+                Product.user_id == user_id,
+            )
         )
         return result.scalar_one_or_none()
     
@@ -39,6 +42,7 @@ class ProductRepository:
     async def create_or_update(
         self,
         wb_id: int,
+        user_id: int,
         name: Optional[str] = None,
         root_id: Optional[int] = None,
         normalized_name: Optional[str] = None,
@@ -47,8 +51,8 @@ class ProductRepository:
         rating: Optional[float] = None,
         url: Optional[str] = None,
     ) -> Product:
-        """Create or update product."""
-        product = await self.get_by_wb_id(wb_id)
+        """Create or update product for the given user."""
+        product = await self.get_by_wb_id(wb_id, user_id)
         
         if product:
             # Update existing product
@@ -73,6 +77,7 @@ class ProductRepository:
         else:
             # Create new product
             product = Product(
+                user_id=user_id,
                 wb_id=wb_id,
                 name=name,
                 root_id=root_id,

@@ -32,6 +32,7 @@ class NotificationWorker:
         """Process single event."""
         try:
             user_id = event.get("user_id")
+            task_id = event.get("task_id")
             product_id = event.get("product_id")
             price = event.get("price")
             
@@ -42,6 +43,10 @@ class NotificationWorker:
             
             if not user_id:
                 logger.error(f"Event has no user_id! Event: {event}")
+                return
+
+            if task_id is None:
+                logger.error(f"Event has no task_id! Event: {event}")
                 return
             
             # Get telegram_id from user_id
@@ -64,17 +69,16 @@ class NotificationWorker:
             
             # Check deduplication (Redis + DB)
             if await NotificationDeduplication.check_exists(
-                user_id, product_id, price
+                task_id, product_id, price
             ):
                 logger.debug(
-                    f"Notification already sent: user={user_id}, "
+                    f"Notification already sent: task={task_id}, "
                     f"product={product_id}, price={price}"
                 )
                 return
-            
-            # Double check in DB
+
             if await self.notification_repo.check_exists(
-                user_id, product_id, price
+                user_id, task_id, product_id, price
             ):
                 logger.debug("Notification exists in DB, skipping")
                 return
@@ -108,8 +112,8 @@ class NotificationWorker:
             )
             
             # Mark as sent
-            await NotificationDeduplication.mark_sent(user_id, product_id, price)
-            await self.notification_repo.create(user_id, product_id, price)
+            await NotificationDeduplication.mark_sent(task_id, product_id, price)
+            await self.notification_repo.create(user_id, task_id, product_id, price)
             
             # Increment counter
             await self.rate_limiter.increment_counter(user_id)

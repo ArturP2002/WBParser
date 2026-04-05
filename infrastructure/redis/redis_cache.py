@@ -8,28 +8,27 @@ class PriceCache:
     """Cache for product prices."""
     
     @staticmethod
-    def _get_key(product_id: int) -> str:
-        """Get cache key for product price."""
-        return f"price:last:{product_id}"
-    
+    def _get_key(task_id: int, product_id: int) -> str:
+        """Cache key: last price for this task–product pair."""
+        return f"price:last:{task_id}:{product_id}"
+
     @staticmethod
-    async def cache_price(product_id: int, price: int) -> None:
-        """Cache product price."""
-        key = PriceCache._get_key(product_id)
-        # Cache for 24 hours
+    async def cache_price(task_id: int, product_id: int, price: int) -> None:
+        """Cache price for a task–product pair."""
+        key = PriceCache._get_key(task_id, product_id)
         await redis_client.set(key, price, ex=86400)
-    
+
     @staticmethod
-    async def get_cached_price(product_id: int) -> Optional[int]:
-        """Get cached price for product."""
-        key = PriceCache._get_key(product_id)
+    async def get_cached_price(task_id: int, product_id: int) -> Optional[int]:
+        """Get cached price for a task–product pair."""
+        key = PriceCache._get_key(task_id, product_id)
         value = await redis_client.get(key)
         if value:
             return int(value)
         return None
-    
+
     @staticmethod
-    async def clear_price_cache(product_id: int) -> None:
-        """Clear cached price for product."""
-        key = PriceCache._get_key(product_id)
+    async def clear_price_cache(task_id: int, product_id: int) -> None:
+        """Clear cached price for a task–product pair."""
+        key = PriceCache._get_key(task_id, product_id)
         await redis_client.delete(key)

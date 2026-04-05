@@ -13,30 +13,34 @@ class NotificationRepository:
         self.session = session
     
     async def check_exists(
-        self, 
-        user_id: int, 
-        product_id: int, 
-        price: int
+        self,
+        user_id: int,
+        task_id: int,
+        product_id: int,
+        price: int,
     ) -> bool:
-        """Check if notification already exists (for deduplication)."""
+        """Check if notification already exists for this task (deduplication)."""
         result = await self.session.execute(
             select(Notification).where(
                 Notification.user_id == user_id,
+                Notification.task_id == task_id,
                 Notification.product_id == product_id,
                 Notification.price == price,
             )
         )
         return result.scalar_one_or_none() is not None
-    
+
     async def create(
-        self, 
-        user_id: int, 
-        product_id: int, 
-        price: int
+        self,
+        user_id: int,
+        task_id: int,
+        product_id: int,
+        price: int,
     ) -> Notification:
         """Create new notification record."""
         notification = Notification(
             user_id=user_id,
+            task_id=task_id,
             product_id=product_id,
             price=price,
         )
