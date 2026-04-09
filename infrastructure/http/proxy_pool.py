@@ -20,8 +20,11 @@ class Proxy:
     success_count: int = 0
     is_active: bool = True
     
-    def to_httpx_proxy(self) -> Dict[str, str]:
-        """Convert to httpx proxy format."""
+    def to_httpx_proxy(self) -> str:
+        """Convert to single proxy URL string.
+
+        curl_cffi AsyncSession expects a string proxy URL (not a mapping).
+        """
         proxy_url = self.url
 
         if self.username and self.password:
@@ -31,11 +34,7 @@ class Proxy:
                 f"{parts.scheme}://{self.username}:{self.password}@"
                 f"{parts.hostname}:{parts.port}"
             )
-        
-        return {
-            "http://": proxy_url,
-            "https://": proxy_url,
-        }
+        return proxy_url
 
 
 class ProxyPool:
