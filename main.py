@@ -60,12 +60,19 @@ async def run_bot():
         
     except asyncio.CancelledError:
         logger.info("Bot service cancelled")
+        raise
     except Exception as e:
         logger.error(f"Error in bot service: {e}", exc_info=True)
+        # Fail fast: let main/systemd restart the whole service if bot crashes.
+        raise
     finally:
         # Stop polling and close bot
         if dp:
-            await dp.stop_polling()
+            try:
+                await dp.stop_polling()
+            except Exception:
+                # Dispatcher might not be fully started yet.
+                pass
         if bot:
             await bot.session.close()
         logger.info("Bot service stopped")
@@ -237,12 +244,9 @@ async def main():
         
         logger.info("All services started")
         
-        # Wait for bot and notifier (parser runs in separate thread)
-        await asyncio.gather(
-            bot_task,
-            notifier_task,
-            return_exceptions=True
-        )
+        # Wait for bot and notifier (parser runs in separate thread).
+        # Any task failure should fail the process so systemd can restart it.
+        await asyncio.gather(bot_task, notifier_task)
         
     except KeyboardInterrupt:
         logger.info("Shutdown signal received")
