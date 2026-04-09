@@ -41,8 +41,14 @@ class ThrottlingMiddleware(BaseMiddleware):
         event: TelegramObject,
         data: Dict[str, Any],
     ) -> Any:
+        # Do not throttle callback queries: users often tap inline actions in quick
+        # succession (e.g., "Удалить" -> "Да"), and throttling here drops valid
+        # confirmations.
+        if isinstance(event, CallbackQuery):
+            return await handler(event, data)
+
         user_id = None
-        if isinstance(event, (Message, CallbackQuery)):
+        if isinstance(event, Message):
             user_id = event.from_user.id if event.from_user else None
 
         if user_id:
