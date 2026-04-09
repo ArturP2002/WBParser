@@ -208,6 +208,14 @@ class ParserEngine:
             
         except Exception as e:
             logger.error(f"Error parsing task {task.id}: {e}")
+            # Reset failed transaction state before any further DB operations.
+            try:
+                await self.session.rollback()
+            except Exception:
+                logger.error(
+                    "Failed to rollback session after parse_task error",
+                    exc_info=True,
+                )
             # Ensure the scheduler doesn't repeatedly re-run the same task immediately
             # after transient HTTP/network issues.
             try:
@@ -296,3 +304,12 @@ class ParserEngine:
             
         except Exception as e:
             logger.error(f"Error in parser cycle: {e}", exc_info=True)
+            # Important: recover from failed transaction state (e.g. asyncpg
+            # InFailedSQLTransactionError) so the next cycle can continue.
+            try:
+                await self.session.rollback()
+            except Exception:
+                logger.error(
+                    "Failed to rollback session after parser cycle error",
+                    exc_info=True,
+                )
