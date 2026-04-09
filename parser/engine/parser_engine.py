@@ -238,16 +238,18 @@ class ParserEngine:
         """Run parser for list of tasks."""
         if not tasks:
             return []
-        
-        # Execute tasks in parallel
-        results = await self.worker_pool.execute(tasks, self.parse_task)
-        
-        # Flatten results
+
+        # NOTE:
+        # parse_task performs many DB operations through a shared AsyncSession.
+        # Running parse_task concurrently leads to SQLAlchemy async context errors
+        # like "greenlet_spawn has not been called". Process tasks sequentially
+        # to keep DB session usage safe and predictable.
         all_events = []
-        for events in results:
+        for task in tasks:
+            events = await self.parse_task(task)
             if events:
                 all_events.extend(events)
-        
+
         return all_events
     
     async def run_cycle(self) -> None:

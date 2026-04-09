@@ -53,6 +53,9 @@ class Config:
     WB_API_VERSION: str = os.getenv("WB_API_VERSION", "v5")  # v4, v5, or v18
     WB_API_TIMEOUT: int = int(os.getenv("WB_API_TIMEOUT", "20"))
     WB_API_RETRIES: int = int(os.getenv("WB_API_RETRIES", "5"))
+    WB_API_RETRY_BASE_DELAY: float = float(os.getenv("WB_API_RETRY_BASE_DELAY", "0.5"))
+    WB_API_RETRY_MAX_DELAY: float = float(os.getenv("WB_API_RETRY_MAX_DELAY", "8.0"))
+    WB_API_RETRY_JITTER: float = float(os.getenv("WB_API_RETRY_JITTER", "0.5"))
     WB_API_MAX_PAGES: int = int(os.getenv("WB_API_MAX_PAGES", "10"))  # Max pages to fetch (1-10, 100 products per page)
     
     # WB Cards API settings (для получения цен)
