@@ -26,7 +26,12 @@ class Config:
     
     # Настройки парсера
     MIN_PRICE_CHANGE: int = int(os.getenv("MIN_PRICE_CHANGE", "200"))
-    PARSER_SEMAPHORE_LIMIT: int = int(os.getenv("PARSER_SEMAPHORE_LIMIT", "50"))
+    PARSER_SEMAPHORE_LIMIT: int = int(os.getenv("PARSER_SEMAPHORE_LIMIT", "10"))
+    # AI relevance filter settings (local sentence-transformers model)
+    RELEVANCE_AI_ENABLED: bool = os.getenv("RELEVANCE_AI_ENABLED", "true").lower() in {"1", "true", "yes"}
+    RELEVANCE_AI_MODEL_NAME: str = os.getenv("RELEVANCE_AI_MODEL_NAME", "intfloat/multilingual-e5-small")
+    RELEVANCE_AI_THRESHOLD: float = float(os.getenv("RELEVANCE_AI_THRESHOLD", "0.72"))
+    RELEVANCE_AI_BATCH_SIZE: int = int(os.getenv("RELEVANCE_AI_BATCH_SIZE", "64"))
     # Parser loop controls
     # By default parser runs continuously; set PARSER_TEST_MODE=true for local debugging.
     PARSER_TEST_MODE: bool = os.getenv("PARSER_TEST_MODE", "false").lower() in {"1", "true", "yes"}

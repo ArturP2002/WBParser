@@ -1,10 +1,21 @@
 """Product filters."""
+from threading import Lock
 from typing import List
 import re
 from parser.wb.wb_models import WBProduct
 from database.models.search_task import SearchTask
 from database.models.task_exclude_word import TaskExcludeWord
 from core.logger import logger
+from core.config import config
+
+try:
+    from sentence_transformers import SentenceTransformer
+except Exception:  # pragma: no cover - defensive fallback for runtime env issues
+    SentenceTransformer = None
+
+
+_model_lock = Lock()
+_relevance_model = None
 
 
 def normalize_text_for_relevance(text: str) -> str:
@@ -47,24 +58,41 @@ def contains_excluded_words(
     return False
 
 
-def is_relevant_to_query(product: WBProduct, query: str) -> bool:
-    """Check if product name contains query keywords (relevance filter).
-    
-    For single-word queries: requires exact word match (as whole word).
-    For multi-word queries: requires at least 50% of significant words (or min 2 words).
-    
-    Args:
-        product: Product to check
-        query: Search query string
-    
-    Returns:
-        True if product is relevant, False otherwise
-    """
-    if not query or not product.name:
-        return True  # If no query, don't filter
+def _get_relevance_model():
+    """Lazy-load sentence-transformers model once per process."""
+    global _relevance_model
+    if _relevance_model is not None:
+        return _relevance_model
+    if SentenceTransformer is None:
+        return None
+
+    with _model_lock:
+        if _relevance_model is not None:
+            return _relevance_model
+        try:
+            _relevance_model = SentenceTransformer(config.RELEVANCE_AI_MODEL_NAME)
+            logger.info(
+                "AI relevance model loaded: %s (threshold=%s)",
+                config.RELEVANCE_AI_MODEL_NAME,
+                config.RELEVANCE_AI_THRESHOLD,
+            )
+        except Exception as e:
+            logger.error(
+                "Failed to load AI relevance model '%s': %s",
+                config.RELEVANCE_AI_MODEL_NAME,
+                e,
+            )
+            _relevance_model = None
+    return _relevance_model
+
+
+def _keyword_relevance(product_name: str, query: str) -> bool:
+    """Fallback lexical relevance when AI model is unavailable."""
+    if not query or not product_name:
+        return True
 
     query_lower = normalize_text_for_relevance(query)
-    product_name_lower = normalize_text_for_relevance(product.name)
+    product_name_lower = normalize_text_for_relevance(product_name)
 
     # Split query into words (remove punctuation, split by spaces)
     query_words = re.findall(r"\b\w+\b", query_lower)
@@ -103,11 +131,53 @@ def is_relevant_to_query(product: WBProduct, query: str) -> bool:
     
     if not is_relevant:
         logger.debug(
-            f"Product filtered by relevance: '{product.name}' "
+            f"Product filtered by keyword relevance: '{product_name}' "
             f"(matched {matched_words}/{total_words} words from query: '{query}')"
         )
-    
+
     return is_relevant
+
+
+def is_relevant_to_query(product: WBProduct, query: str) -> bool:
+    """Backward-compatible lexical relevance checker used by tests."""
+    return _keyword_relevance(product.name, query)
+
+
+def _ai_relevance_scores(query: str, product_names: List[str]) -> List[float] | None:
+    """Compute AI relevance cosine scores for query and product names."""
+    model = _get_relevance_model()
+    if model is None:
+        return None
+
+    try:
+        query_input = f"query: {normalize_text_for_relevance(query)}"
+        doc_inputs = [
+            f"passage: {normalize_text_for_relevance(name)}"
+            for name in product_names
+        ]
+        # Batch encoding keeps CPU usage predictable on VPS.
+        query_emb = model.encode(
+            [query_input],
+            convert_to_numpy=True,
+            normalize_embeddings=True,
+            show_progress_bar=False,
+        )
+        doc_embs = model.encode(
+            doc_inputs,
+            convert_to_numpy=True,
+            normalize_embeddings=True,
+            batch_size=config.RELEVANCE_AI_BATCH_SIZE,
+            show_progress_bar=False,
+        )
+        query_vec = query_emb[0].tolist() if hasattr(query_emb[0], "tolist") else query_emb[0]
+        scores: List[float] = []
+        for doc in doc_embs:
+            doc_vec = doc.tolist() if hasattr(doc, "tolist") else doc
+            scores.append(float(sum(float(a) * float(b) for a, b in zip(doc_vec, query_vec))))
+        return scores
+    except Exception as e:
+        logger.error("AI relevance scoring failed: %s", e)
+        return None
 
 
 def price_in_range(
@@ -144,11 +214,29 @@ def filter_products(
     excluded_filtered = 0
     price_filtered = 0
     
-    for product in products:
-        # Check relevance to query (must contain query keywords)
-        if not is_relevant_to_query(product, task.query):
-            relevance_filtered += 1
-            continue
+    # AI relevance pass (local sentence-transformers). Falls back to lexical rules if needed.
+    ai_scores = None
+    if config.RELEVANCE_AI_ENABLED and task.query and products:
+        ai_scores = _ai_relevance_scores(task.query, [p.name for p in products])
+
+    for idx, product in enumerate(products):
+        # Check relevance to query
+        if task.query:
+            if ai_scores is not None:
+                score = ai_scores[idx]
+                if score < config.RELEVANCE_AI_THRESHOLD:
+                    relevance_filtered += 1
+                    logger.debug(
+                        "Product filtered by AI relevance: '%s' (score=%.4f, threshold=%.4f, query='%s')",
+                        product.name,
+                        score,
+                        config.RELEVANCE_AI_THRESHOLD,
+                        task.query,
+                    )
+                    continue
+            elif not _keyword_relevance(product.name, task.query):
+                relevance_filtered += 1
+                continue
         
         # Check excluded words
         if contains_excluded_words(product, task.exclude_words):
